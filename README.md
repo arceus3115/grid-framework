@@ -8,7 +8,8 @@ A lightweight, zero-dependency Go framework for the GRID GraphQL APIs (**Central
 - A **GRID API key** exported in your environment:
 
 ```bash
-read -r -s -p 'GRID API key: ' GRID_API_KEY
+printf 'GRID API key: '
+IFS= read -r -s GRID_API_KEY
 printf '\n'
 export GRID_API_KEY
 ```
