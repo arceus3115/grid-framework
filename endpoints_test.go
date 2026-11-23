@@ -198,6 +198,9 @@ func TestStatsFeedTeamAndCustomInlineFragmentForm(t *testing.T) {
 	rawMap, err := TeamGameStatisticsWithForm(context.Background(), client, TeamGameStatisticsParams{
 		TeamID: "47351",
 		Selection: &GameSelection{
+			Filter: &GameStateFilter{
+				StartedAt: &StatsDateTimeFilter{Period: TimeRangeLastMonth},
+			},
 			First: Int(5),
 		},
 	}, lolForm)
@@ -206,6 +209,13 @@ func TestStatsFeedTeamAndCustomInlineFragmentForm(t *testing.T) {
 	}
 	if !strings.Contains(received.Query, "... on TeamGameStatisticsLol") {
 		t.Fatalf("expected inline fragment in query, got:\n%s", received.Query)
+	}
+	selection, err := json.Marshal(received.Variables["selection"])
+	if err != nil {
+		t.Fatalf("marshal selection variable: %v", err)
+	}
+	if want := `{"filter":{"startedAt":{"period":"LAST_MONTH"}},"first":5}`; string(selection) != want {
+		t.Fatalf("selection variable = %s, want %s", selection, want)
 	}
 	if rawMap["count"].(float64) != 5 {
 		t.Fatalf("unexpected map result: %#v", rawMap)

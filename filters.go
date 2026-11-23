@@ -37,7 +37,7 @@ type IntFilter struct {
 	LTE    *int `json:"lte,omitempty"`
 }
 
-// DateTimeFilter filters by an ISO-8601 DateTime range (e.g. "2024-01-01T00:00:00Z").
+// DateTimeFilter filters Central Data results by an ISO-8601 date and time range.
 type DateTimeFilter struct {
 	GTE *string `json:"gte,omitempty"`
 	LTE *string `json:"lte,omitempty"`

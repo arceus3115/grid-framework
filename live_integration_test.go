@@ -368,6 +368,11 @@ func TestLiveStats(t *testing.T) {
 	t.Run("TeamGameStatistics", func(t *testing.T) {
 		stats, err := client.Stats.TeamGameStatistics(ctx, TeamGameStatisticsParams{
 			TeamID: teams[0].ID,
+			Selection: &GameSelection{
+				Filter: &GameStateFilter{
+					StartedAt: &StatsDateTimeFilter{Period: TimeRangeLastMonth},
+				},
+			},
 		})
 		if err != nil {
 			t.Fatalf("TeamGameStatistics(%s) error: %v", teams[0].ID, err)

@@ -36,6 +36,7 @@ type StatsTournamentFilter struct {
 	IncludeChildren bool      `json:"includeChildren"`
 }
 
+// StatsDateTimeFilter filters Stats Feed results by a predefined time period.
 type StatsDateTimeFilter struct {
 	Period TimeRangeFilter `json:"period,omitempty"`
 }
@@ -117,7 +118,7 @@ type GameStateFilter struct {
 	TournamentIDs *IDFilter              `json:"tournamentIds,omitempty"`
 	Tournament    *StatsTournamentFilter `json:"tournament,omitempty"`
 	TimeWindow    TimeRangeFilter        `json:"timeWindow,omitempty"`
-	StartedAt     *DateTimeFilter        `json:"startedAt,omitempty"`
+	StartedAt     *StatsDateTimeFilter   `json:"startedAt,omitempty"`
 	And           []GameStateFilter      `json:"and,omitempty"`
 	Or            []GameStateFilter      `json:"or,omitempty"`
 }
