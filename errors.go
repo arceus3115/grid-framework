@@ -6,6 +6,9 @@ import (
 	"strings"
 )
 
+// ErrMissingAPIKey indicates that GRID_API_KEY is unset or blank.
+var ErrMissingAPIKey = errors.New("grid client: set GRID_API_KEY to your GRID API key")
+
 // ErrorType represents GRID GraphQL error types documented in the GRID API reference.
 type ErrorType string
 

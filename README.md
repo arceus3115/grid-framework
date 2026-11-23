@@ -1,11 +1,11 @@
 # grid-framework
 
-A lightweight Go client for the GRID GraphQL APIs (**Central Data**, **Series State**, and **Stats Feed**) with no third-party dependencies.
+A Go client for GRID Central Data, Series State, and Stats Feed. Typed methods handle authentication, GraphQL queries, and decoding with no third-party dependencies.
 
 ## Prerequisites
 
 - **Go 1.25+** installed (`go version`)
-- A **GRID API key** exported in your environment:
+- A **GRID API key** in the `GRID_API_KEY` environment variable. Get a key from [Riot Games Open Access powered by GRID](https://grid.gg/riot-open-access/) or use your commercial GRID key.
 
 ```bash
 printf 'GRID API key: '
@@ -16,29 +16,19 @@ export GRID_API_KEY
 
 ## Install
 
-Run this in your Go project's module directory. For a new project, run `go mod init` with your project's module path first.
+If you are starting a new Go project, run `go mod init example.com/myapp` in its directory. Substitute your own module path.
 
-```bash
-go get github.com/arceus3115/grid-framework@v0.1.0
-```
-
-Import the package in your Go code. Its package name is `grid`.
-
-```go
-import "github.com/arceus3115/grid-framework"
-```
-
-For local development before release, create a Go workspace from your consumer project's module directory. Adjust the path to your clone of `grid-framework`.
+The examples below use APIs added after `v0.1.0`. To use them before the next release, run this command in your Go project's module directory. Adjust the path to your checkout of `grid-framework`.
 
 ```bash
 go work init . ../grid-framework
 ```
 
-If you already use a workspace, add the checkout with `go work use ../grid-framework`. The import path is the same in both cases.
+If you already use a workspace, add the checkout with `go work use ../grid-framework`. To install the latest release, run `go get github.com/arceus3115/grid-framework@latest`. The import path is the same in both cases, and the package name is `grid`.
 
 ## Quick Start
 
-Save the following as `main.go` in your Go project and run it with `go run .`:
+Save this as `main.go` and run `go run .`. The program finds a recent League of Legends series and fetches its state using the returned ID.
 
 ```go
 package main
@@ -47,7 +37,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 
 	"github.com/arceus3115/grid-framework"
 )
@@ -55,104 +44,79 @@ import (
 func main() {
 	ctx := context.Background()
 
-	apiKey := os.Getenv("GRID_API_KEY")
-	if apiKey == "" {
-		log.Fatal("GRID_API_KEY is not set")
-	}
-
-	// Defaults to Riot Open Access endpoints (api-op.grid.gg) with a 30s timeout.
-	client := grid.NewClient(apiKey)
-
-	// 1. Central Data: list titles
-	titles, err := client.CentralData.Titles(ctx, grid.TitlesParams{})
+	client, err := grid.NewClientFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Titles:", len(titles))
 
-	// 2. Central Data: fetch recent League of Legends series
-	seriesPage, err := client.CentralData.AllSeries(ctx, grid.AllSeriesParams{
-		Page:           grid.PageParams{First: grid.Int(10)},
-		OrderBy:        grid.SeriesOrderByStartTimeScheduled,
-		OrderDirection: grid.OrderDirectionDesc,
-		Filter: &grid.SeriesFilter{
-			TitleIDs: &grid.IDFilter{In: []string{grid.TitleIDLeagueOfLegends}},
-		},
-	})
+	series, err := client.CentralData.RecentSeries(ctx, grid.TitleIDLeagueOfLegends, 1)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, s := range seriesPage.Nodes() {
-		fmt.Println("Series:", s.ID, s.StartTimeScheduled)
+	if len(series) == 0 {
+		fmt.Println("No recent series available")
+		return
 	}
 
-	// 3. Series State: inspect a series by ID
-	state, err := client.SeriesState.Get(ctx, "2589176")
+	state, err := client.SeriesState.Get(ctx, series[0].ID)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Series finished:", state.Finished)
+	fmt.Printf("Series %s finished: %t\n", series[0].ID, state.Finished)
 }
 ```
+
+To discover title IDs, call `client.CentralData.ListTitles(ctx)`. Run `go doc .` from the SDK checkout for the package overview.
 
 For a browser frontend, call these methods from a Go backend and have the browser call your backend. Read `GRID_API_KEY` on the server.
 
 ## Client Configuration
 
-`grid.NewClient(apiKey, opts...)` accepts functional options:
+`grid.NewClientFromEnv()` reads `GRID_API_KEY` and reports `grid.ErrMissingAPIKey` if it is unset or blank. Use `grid.NewClient(apiKey, opts...)` when your application already manages the key. Both default to Riot Open Access and a 30-second HTTP timeout. Reuse the client across requests and use contexts for request or workflow deadlines.
 
-```go
-client := grid.NewClient(
-	os.Getenv("GRID_API_KEY"),
-	grid.WithCommercialEndpoints(),       // Switch from api-op.grid.gg to api.grid.gg
-	grid.WithTimeout(15*time.Second),     // Override default 30s HTTP timeout
-	grid.WithHeader("User-Agent", "app"), // Add custom headers to every request
-)
-```
+For a commercial key, use `grid.NewClientFromEnv(grid.WithCommercialEndpoints())`. Stats Feed methods such as `client.Stats.TeamStatistics` require Stats Feed access on the account. [GRID access plans](https://grid.gg/get-access/)
 
-With a commercial GRID key that has Stats Feed access, use `grid.WithCommercialEndpoints()` and call methods such as `client.Stats.TeamStatistics`.
-
-Available options:
+Both constructors apply options in the order supplied.
 
 - `WithCommercialEndpoints()` — use `https://api.grid.gg/...` endpoints instead of Riot Open Access (`https://api-op.grid.gg/...`).
 - `WithEndpoints(Endpoints{...})` — override all three API URLs at once.
 - `WithCentralDataEndpoint(url)` / `WithSeriesStateEndpoint(url)` / `WithStatsEndpoint(url)` — override a single API URL.
-- `WithHTTPClient(hc)` — supply a custom `*http.Client`.
-- `WithTimeout(d)` — set the HTTP client timeout.
+- `WithHTTPClient(hc)` — copy a custom HTTP client's settings and share its transport and cookie jar.
+- `WithTimeout(d)` — set the HTTP client timeout. Use it after `WithHTTPClient` to override that client's timeout.
 - `WithHeader(key, value)` — attach a custom header to every request.
+
+Use overrides for trusted GraphQL URLs. The client rejects cross-origin redirects to protect the API key. Configure a redirected URL directly with the appropriate endpoint option.
 
 ## API Overview
 
 | Service | Methods |
 | --- | --- |
-| `client.CentralData` | `Titles`, `Title`, `AllSeries`, `Series`, `SeriesFormats`, `Teams`, `Team`, `Players`, `Player`, `PlayerRoles`, `PlayerRole`, `Tournaments`, `Tournament`, `Organizations`, `Organization`, `DataProviders`, `ContentCatalogEntities`, `ContentCatalogEntity`, `ContentCatalogVersions`, `ContentCatalogVersion`, `SeriesIDByExternalID`, `TeamIDByExternalID`, `PlayerIDByExternalID`, `TournamentIDByExternalID` |
+| `client.CentralData` | `ListTitles`, `ListPlayerRoles`, `RecentSeries`, and the paginated `List` methods below. Use `Titles` or `PlayerRoles` for filtered results, `AllSeries` for one page of series, and singular methods such as `Series`, `Team`, or `Tournament` for lookups by ID. External ID helpers include `SeriesIDByExternalID` and `GameIDByExternalID`. |
 | `client.SeriesState` | `Get` |
 | `client.Stats` | `TeamStatistics`, `TeamGameStatistics`, `PlayerStatistics`, `SeriesStatistics`, `GameStatistics` |
 
-For custom raw queries not covered by a helper, call `client.DoRaw(ctx, api, operationName, query, variables)` or `grid.Execute(ctx, client, api, spec, form)`.
+For a custom GraphQL document, use `client.DoRaw(ctx, api, operationName, query, variables)`. To build and decode a custom root query, use `grid.Execute(ctx, client, api, spec, form)`.
 
 ## Pagination
 
-Paginated Central Data queries accept `grid.PageParams` (use `First`/`After` for forward pagination or `Last`/`Before` for backward pagination; max page size is `grid.MaxPageSize` = 50) and return `grid.Connection[T]`.
-
-Use `grid.CollectAll` to automatically follow `PageInfo.EndCursor` across multiple pages:
+Use `ListSeries`, `ListTeams`, `ListPlayers`, `ListTournaments`, `ListOrganizations`, `ListContentCatalogEntities`, or `ListContentCatalogVersions` to walk matching records. Each fetches a page when needed. Breaking the loop stops further requests.
 
 ```go
-allTeams, err := grid.CollectAll(ctx, 5, func(ctx context.Context, after *string) (grid.Connection[grid.Team], error) {
-	return client.CentralData.Teams(ctx, grid.TeamsParams{
-		Page: grid.PageParams{
-			First: grid.Int(50),
-			After: after,
-		},
-	})
-})
+for team, err := range client.CentralData.ListTeams(ctx, grid.TeamsParams{}) {
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(team.ID, team.Name)
+}
 ```
 
-Pass `maxPages <= 0` to fetch until `HasNextPage` is `false`.
+Zero-valued `PageParams` start at the first page with up to `grid.MaxPageSize` (50) records per request. Set `First` or `Last` to change the page size, or `After` or `Before` to resume from a cursor. `Last` or `Before` traverses backward and yields nodes in reverse order. An iterator yields a terminal error if a fetch fails or a cursor cannot advance.
+
+Use methods such as `Teams` or `AllSeries` for a single `grid.Connection[T]` with page metadata and cursors. `grid.CollectAll` can collect pages from a custom forward fetch function with a page limit. A `maxPages` value of zero or less fetches all pages.
 
 ## Modular Return Forms (`Form[T]`)
 
-Every query has a `*WithForm` generic counterpart that accepts any `Form[T]`, decoupling *which GraphQL fields are requested* (`Selection`) from *how the JSON response is decoded into Go*.
+Most typed queries have a `WithForm` counterpart that accepts a `Form[T]`. Use it to choose GraphQL fields with `Selection` and decode the result into your own Go type.
 
 ### 1. Custom DTO + Composed Selection
 
@@ -224,14 +188,14 @@ if err != nil {
 
 ## Running Tests
 
-Run the framework's offline unit and `httptest` integration tests from the repository root:
+Run the offline unit and `httptest` integration tests from the repository root.
 
 ```bash
 env -u GRID_API_KEY go test -v -race ./...
 go vet ./...
 ```
 
-To also run the opt-in live integration tests against the GRID API, export `GRID_API_KEY` as shown in [Prerequisites](#prerequisites):
+To also run the live integration tests against the GRID API, export `GRID_API_KEY` as shown in [Prerequisites](#prerequisites).
 
 ```bash
 go test -v -race -count=1 ./...
@@ -239,9 +203,4 @@ go test -v -race -count=1 ./...
 
 ## Release
 
-Run the offline tests and commit the release changes. From the repository root, tag that commit and push the tag to GitHub.
-
-```bash
-git tag -a v0.1.0 -m "Release grid-framework v0.1.0"
-git push origin v0.1.0
-```
+Run the offline tests, commit the release changes, and publish a new version tag for that commit.

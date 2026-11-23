@@ -3,10 +3,115 @@ package grid
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	defer req.Body.Close()
+	return f(req)
+}
+
+func stubResponse(status int, body string) *http.Response {
+	return &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func TestNewClientFromEnv(t *testing.T) {
+	for _, value := range []string{"", " \t\n"} {
+		t.Setenv("GRID_API_KEY", value)
+		client, err := NewClientFromEnv()
+		if client != nil || !errors.Is(err, ErrMissingAPIKey) {
+			t.Fatalf("NewClientFromEnv with blank key returned %v, %v", client, err)
+		}
+	}
+
+	t.Setenv("GRID_API_KEY", " test-key\n")
+	httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if got, want := req.URL.String(), CommercialEndpoints().CentralData; got != want {
+			t.Fatalf("endpoint = %q, want %q", got, want)
+		}
+		if got := req.Header.Get("X-Api-Key"); got != "test-key" {
+			t.Error("missing or incorrect API key header")
+		}
+		return stubResponse(http.StatusOK, `{"data":{"titles":[{"id":"3"}]}}`), nil
+	})}
+	client, err := NewClientFromEnv(WithCommercialEndpoints(), WithHTTPClient(httpClient))
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles, err := client.CentralData.ListTitles(t.Context())
+	if err != nil || len(titles) != 1 || titles[0].ID != "3" {
+		t.Fatalf("ListTitles = %#v, %v", titles, err)
+	}
+}
+
+func TestCustomHTTPClientSettings(t *testing.T) {
+	httpClient := &http.Client{Timeout: time.Second}
+	first := NewClient("key", WithHTTPClient(httpClient), WithTimeout(2*time.Second))
+	second := NewClient("key", WithHTTPClient(httpClient))
+	if first.httpClient.Timeout != 2*time.Second || second.httpClient.Timeout != time.Second {
+		t.Fatalf("timeouts = %s and %s", first.httpClient.Timeout, second.httpClient.Timeout)
+	}
+	if httpClient.Timeout != time.Second || httpClient.CheckRedirect != nil {
+		t.Fatal("construction changed the caller's HTTP client")
+	}
+}
+
+func TestClientRedirects(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		location string
+		blocked  bool
+	}{
+		{name: "same origin", location: "/canonical"},
+		{name: "different host", location: "https://other.example/canonical", blocked: true},
+		{name: "different port", location: "https://grid.example:8443/canonical", blocked: true},
+		{name: "different scheme", location: "http://grid.example/canonical", blocked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests, checks := 0, 0
+			httpClient := &http.Client{
+				CheckRedirect: func(*http.Request, []*http.Request) error {
+					checks++
+					return nil
+				},
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requests++
+					if req.URL.Path == "/graphql" {
+						resp := stubResponse(http.StatusTemporaryRedirect, "")
+						resp.Header.Set("Location", tc.location)
+						return resp, nil
+					}
+					if req.Header.Get("X-Api-Key") != "test-key" {
+						t.Error("same-origin redirect lost the API key header")
+					}
+					return stubResponse(http.StatusOK, `{"data":{"titles":[]}}`), nil
+				}),
+			}
+			client := NewClient("test-key", WithHTTPClient(httpClient), WithCentralDataEndpoint("https://grid.example/graphql"))
+			_, err := client.CentralData.ListTitles(t.Context())
+			if tc.blocked {
+				var httpErr *HTTPError
+				if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusTemporaryRedirect || requests != 1 || checks != 0 {
+					t.Fatalf("blocked redirect returned err=%v, requests=%d, checks=%d", err, requests, checks)
+				}
+			} else if err != nil || requests != 2 || checks != 1 {
+				t.Fatalf("same-origin redirect returned err=%v, requests=%d, checks=%d", err, requests, checks)
+			}
+		})
+	}
+}
 
 func TestClientEndpointsAndHeaders(t *testing.T) {
 	var gotAPIKey string

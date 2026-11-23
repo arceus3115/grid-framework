@@ -5,9 +5,15 @@ import (
 	"fmt"
 )
 
-// CentralDataService provides convenience methods using default return forms
-// for the GRID Central Data GraphQL API.
-// For custom/modular return forms, use the matching package-level *WithForm functions.
+// CentralDataService queries the GRID Central Data API using typed results.
+// For custom results, use the matching package-level WithForm functions where available.
+//
+// List methods for paginated endpoints yield one node at a time and fetch a page
+// when needed. They use [MaxPageSize] unless First or Last is set, and follow the
+// direction and starting cursor in [PageParams]. Backward traversal yields nodes
+// in reverse order. A terminal error is yielded once. Breaking the loop stops
+// further requests. Each new iteration starts from the original parameters.
+// Keep parameters and the values they reference unchanged while iterating.
 type CentralDataService struct {
 	client *Client
 }

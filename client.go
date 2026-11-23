@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -34,19 +37,19 @@ type Endpoints struct {
 
 // OpenAccessEndpoints returns the default Riot Open Access GRID endpoints (api-op.grid.gg).
 func OpenAccessEndpoints() Endpoints {
-	return Endpoints{
-		CentralData: "https://api-op.grid.gg/central-data/graphql",
-		SeriesState: "https://api-op.grid.gg/live-data-feed/series-state/graphql",
-		StatsFeed:   "https://api-op.grid.gg/statistics-feed/graphql",
-	}
+	return endpointsAt("https://api-op.grid.gg")
 }
 
 // CommercialEndpoints returns the standard commercial GRID endpoints (api.grid.gg).
 func CommercialEndpoints() Endpoints {
+	return endpointsAt("https://api.grid.gg")
+}
+
+func endpointsAt(baseURL string) Endpoints {
 	return Endpoints{
-		CentralData: "https://api.grid.gg/central-data/graphql",
-		SeriesState: "https://api.grid.gg/live-data-feed/series-state/graphql",
-		StatsFeed:   "https://api.grid.gg/statistics-feed/graphql",
+		CentralData: baseURL + "/central-data/graphql",
+		SeriesState: baseURL + "/live-data-feed/series-state/graphql",
+		StatsFeed:   baseURL + "/statistics-feed/graphql",
 	}
 }
 
@@ -73,7 +76,9 @@ func (e Endpoints) URLFor(api API) (string, error) {
 	}
 }
 
-// Client is the main entry point for querying GRID GraphQL APIs.
+// Client is the main entry point for querying GRID GraphQL APIs. Construct it
+// with [NewClient] or [NewClientFromEnv] and reuse it across requests. A client
+// can make concurrent requests as long as its service fields stay unchanged.
 type Client struct {
 	apiKey     string
 	endpoints  Endpoints
@@ -124,16 +129,19 @@ func WithStatsEndpoint(url string) ClientOption {
 	}
 }
 
-// WithHTTPClient sets a custom *http.Client for outbound requests.
+// WithHTTPClient copies the settings from a custom HTTP client for outbound
+// requests. Its transport and cookie jar are shared with the GRID client.
 func WithHTTPClient(httpClient *http.Client) ClientOption {
 	return func(c *Client) {
 		if httpClient != nil {
-			c.httpClient = httpClient
+			clientCopy := *httpClient
+			c.httpClient = &clientCopy
 		}
 	}
 }
 
-// WithTimeout sets the timeout on the underlying HTTP client.
+// WithTimeout sets the timeout on the underlying HTTP client. Apply it after
+// [WithHTTPClient] to override the supplied client's timeout.
 func WithTimeout(timeout time.Duration) ClientOption {
 	return func(c *Client) {
 		c.httpClient.Timeout = timeout
@@ -146,12 +154,14 @@ func WithHeader(key, value string) ClientOption {
 		if c.headers == nil {
 			c.headers = make(map[string]string)
 		}
-		c.headers[key] = value
+		c.headers[http.CanonicalHeaderKey(key)] = value
 	}
 }
 
 // NewClient creates a new GRID API client authenticated with apiKey.
-// By default it targets the Riot Open Access endpoints (api-op.grid.gg).
+// It defaults to Riot Open Access endpoints (api-op.grid.gg) and a 30-second
+// HTTP timeout. Options are applied in the order supplied. Redirects to a
+// different origin are returned as HTTP errors to protect the API key.
 func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c := &Client{
 		apiKey:    apiKey,
@@ -159,17 +169,41 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		headers: make(map[string]string),
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
 		}
 	}
+	checkRedirect := c.httpClient.CheckRedirect
+	c.httpClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		origin := via[0].URL
+		if !strings.EqualFold(req.URL.Scheme, origin.Scheme) || !strings.EqualFold(req.URL.Host, origin.Host) {
+			return http.ErrUseLastResponse
+		}
+		if checkRedirect != nil {
+			return checkRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
 	c.CentralData = &CentralDataService{client: c}
 	c.SeriesState = &SeriesStateService{client: c}
 	c.Stats = &StatsService{client: c}
 	return c
+}
+
+// NewClientFromEnv reads the API key from GRID_API_KEY and creates a client
+// with the same defaults and options as [NewClient]. It returns
+// [ErrMissingAPIKey] if the value is unset or blank. It makes no API requests.
+func NewClientFromEnv(opts ...ClientOption) (*Client, error) {
+	apiKey := strings.TrimSpace(os.Getenv("GRID_API_KEY"))
+	if apiKey == "" {
+		return nil, ErrMissingAPIKey
+	}
+	return NewClient(apiKey, opts...), nil
 }
 
 type graphQLRequest struct {
