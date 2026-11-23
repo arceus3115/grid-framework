@@ -1,6 +1,6 @@
 # grid-framework
 
-A lightweight, zero-dependency Go framework for the GRID GraphQL APIs (**Central Data**, **Series State**, and **Stats Feed**) documented in `GRID-API-DATA.md`.
+A lightweight Go client for the GRID GraphQL APIs (**Central Data**, **Series State**, and **Stats Feed**) with no third-party dependencies.
 
 ## Prerequisites
 
@@ -14,34 +14,27 @@ printf '\n'
 export GRID_API_KEY
 ```
 
-## Setup: Using `grid-framework` in Your Go Code
+## Install
 
-Because `grid-framework` is a standalone local Go module (`module grid-framework`), you can import it into any Go application in two ways:
-
-### Option A: `replace` directive in your project's `go.mod`
-
-From your Go project directory:
+Run this in your Go project's module directory. For a new project, run `go mod init` with your project's module path first.
 
 ```bash
-go mod init my-grid-app
-go mod edit -require=grid-framework@v0.0.0 -replace=grid-framework=../grid-framework
+go get github.com/arceus3115/grid-framework@v0.1.0
 ```
 
-(Adjust `../grid-framework` to the relative or absolute path to `grid-framework/`.)
-
-### Option B: Go workspace (`go.work`)
-
-If you are working across multiple local modules:
-
-```bash
-go work init ./grid-framework ./my-grid-app
-```
-
-Then import the package in your Go code as:
+Import the package in your Go code. Its package name is `grid`.
 
 ```go
-import grid "grid-framework"
+import "github.com/arceus3115/grid-framework"
 ```
+
+For local development before release, create a Go workspace from your consumer project's module directory. Adjust the path to your clone of `grid-framework`.
+
+```bash
+go work init . ../grid-framework
+```
+
+If you already use a workspace, add the checkout with `go work use ../grid-framework`. The import path is the same in both cases.
 
 ## Quick Start
 
@@ -56,7 +49,7 @@ import (
 	"log"
 	"os"
 
-	grid "grid-framework"
+	"github.com/arceus3115/grid-framework"
 )
 
 func main() {
@@ -99,18 +92,10 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println("Series finished:", state.Finished)
-
-	// 4. Stats Feed: fetch team statistics
-	stats, err := client.Stats.TeamStatistics(ctx, grid.TeamStatisticsParams{
-		TeamID: "47351",
-		Filter: grid.TeamStatisticsFilter{TimeWindow: grid.TimeRangeLast3Months},
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println("Series count:", stats.Series.Count)
 }
 ```
+
+For a browser frontend, call these methods from a Go backend and have the browser call your backend. Read `GRID_API_KEY` on the server.
 
 ## Client Configuration
 
@@ -124,6 +109,8 @@ client := grid.NewClient(
 	grid.WithHeader("User-Agent", "app"), // Add custom headers to every request
 )
 ```
+
+With a commercial GRID key that has Stats Feed access, use `grid.WithCommercialEndpoints()` and call methods such as `client.Stats.TeamStatistics`.
 
 Available options:
 
@@ -237,17 +224,24 @@ if err != nil {
 
 ## Running Tests
 
-Run the framework's offline unit and `httptest` integration tests from inside `grid-framework/`:
+Run the framework's offline unit and `httptest` integration tests from the repository root:
 
 ```bash
-cd grid-framework
-go test -v -race ./...
+env -u GRID_API_KEY go test -v -race ./...
 go vet ./...
 ```
 
 To also run the opt-in live integration tests against the GRID API, export `GRID_API_KEY` as shown in [Prerequisites](#prerequisites):
 
 ```bash
-cd grid-framework
 go test -v -race -count=1 ./...
+```
+
+## Release
+
+Run the offline tests and commit the release changes. From the repository root, tag that commit and push the tag to GitHub.
+
+```bash
+git tag -a v0.1.0 -m "Release grid-framework v0.1.0"
+git push origin v0.1.0
 ```

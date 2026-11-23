@@ -1,0 +1,14 @@
+# Local credentials
+.env
+.env.*
+!.env.example
+.envrc
+
+# Go workspace and test output
+go.work
+go.work.sum
+*.test
+*.out
+
+# macOS metadata
+.DS_Store
