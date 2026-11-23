@@ -8,7 +8,9 @@ A lightweight, zero-dependency Go framework for the GRID GraphQL APIs (**Central
 - A **GRID API key** exported in your environment:
 
 ```bash
-export GRID_API_KEY="your-api-key-here"
+read -r -s -p 'GRID API key: ' GRID_API_KEY
+printf '\n'
+export GRID_API_KEY
 ```
 
 ## Setup: Using `grid-framework` in Your Go Code
@@ -242,9 +244,9 @@ go test -v -race ./...
 go vet ./...
 ```
 
-To also run the opt-in live integration tests against the GRID API, set `GRID_API_KEY`:
+To also run the opt-in live integration tests against the GRID API, export `GRID_API_KEY` as shown in [Prerequisites](#prerequisites):
 
 ```bash
 cd grid-framework
-GRID_API_KEY="your-api-key-here" go test -v -race -count=1 ./...
+go test -v -race -count=1 ./...
 ```
