@@ -126,7 +126,7 @@ func TestClientEndpointsAndHeaders(t *testing.T) {
 
 	client := NewClient("secret-key",
 		WithCentralDataEndpoint(srv.URL),
-		WithHeader("X-Custom", "iwilldraft"),
+		WithHeader("X-Custom", "example-value"),
 	)
 
 	titles, err := client.CentralData.Titles(context.Background(), TitlesParams{})
@@ -136,8 +136,8 @@ func TestClientEndpointsAndHeaders(t *testing.T) {
 	if gotAPIKey != "secret-key" {
 		t.Fatalf("expected x-api-key=secret-key, got %q", gotAPIKey)
 	}
-	if gotCustomHeader != "iwilldraft" {
-		t.Fatalf("expected X-Custom=iwilldraft, got %q", gotCustomHeader)
+	if gotCustomHeader != "example-value" {
+		t.Fatalf("expected X-Custom=example-value, got %q", gotCustomHeader)
 	}
 	if len(titles) != 1 || titles[0].ID != "3" {
 		t.Fatalf("unexpected titles: %#v", titles)

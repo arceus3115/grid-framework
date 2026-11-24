@@ -1,20 +1,57 @@
+//go:build integration
+
 package grid
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
 func newLiveClient(t *testing.T) *Client {
 	t.Helper()
-	apiKey := os.Getenv("GRID_API_KEY")
-	if apiKey == "" {
+	client, err := NewClientFromEnv(liveClientOption(t))
+	if errors.Is(err, ErrMissingAPIKey) {
 		t.Skip("GRID_API_KEY not set; skipping live GRID API integration test")
 	}
-	return NewClient(apiKey, WithTimeout(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func liveClientOption(t *testing.T) ClientOption {
+	t.Helper()
+	switch os.Getenv("GRID_TEST_ACCESS") {
+	case "", "open":
+		return WithEndpoints(OpenAccessEndpoints())
+	case "commercial":
+		return WithCommercialEndpoints()
+	default:
+		t.Fatal("GRID_TEST_ACCESS must be open or commercial")
+		return nil
+	}
+}
+
+func liveTitleID(t *testing.T, ctx context.Context, client *Client) string {
+	t.Helper()
+	if id := strings.TrimSpace(os.Getenv("GRID_TEST_TITLE_ID")); id != "" {
+		return id
+	}
+	titles, err := liveCall(t, func() ([]Title, error) {
+		return client.CentralData.ListTitles(ctx)
+	})
+	if err != nil {
+		t.Fatalf("ListTitles() error: %v", err)
+	}
+	if len(titles) == 0 {
+		t.Fatal("ListTitles() returned 0 titles")
+	}
+	return titles[0].ID
 }
 
 func liveCall[T any](t *testing.T, fn func() (T, error)) (T, error) {
@@ -38,6 +75,7 @@ func TestLiveCentralData(t *testing.T) {
 	client := newLiveClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	titleID := liveTitleID(t, ctx, client)
 
 	t.Run("Titles", func(t *testing.T) {
 		titles, err := client.CentralData.Titles(ctx, TitlesParams{})
@@ -51,21 +89,21 @@ func TestLiveCentralData(t *testing.T) {
 	})
 
 	t.Run("TitleByID", func(t *testing.T) {
-		title, err := client.CentralData.Title(ctx, "3")
+		title, err := client.CentralData.Title(ctx, titleID)
 		if err != nil {
-			t.Fatalf("Title(3) error: %v", err)
+			t.Fatalf("Title(%s) error: %v", titleID, err)
 		}
-		if title.ID != "3" {
-			t.Fatalf("Title(3) got id=%q, want 3", title.ID)
+		if title.ID != titleID {
+			t.Fatalf("Title(%s) got id=%q", titleID, title.ID)
 		}
-		t.Logf("Title(3): name=%q nameShortened=%q", title.Name, title.NameShortened)
+		t.Logf("Title(%s): name=%q nameShortened=%q", titleID, title.Name, title.NameShortened)
 	})
 
 	t.Run("Tournaments", func(t *testing.T) {
 		page, err := client.CentralData.Tournaments(ctx, TournamentsParams{
 			Page: PageParams{First: Int(5)},
 			Filter: &TournamentFilter{
-				Title: &TournamentTitleFilter{ID: &IDFilter{In: []string{"3"}}},
+				Title: &TournamentTitleFilter{ID: &IDFilter{In: []string{titleID}}},
 			},
 		})
 		if err != nil {
@@ -90,7 +128,7 @@ func TestLiveCentralData(t *testing.T) {
 			Page:           PageParams{First: Int(5)},
 			OrderBy:        SeriesOrderByStartTimeScheduled,
 			OrderDirection: OrderDirectionDesc,
-			Filter:         &SeriesFilter{TitleID: String("3")},
+			Filter:         &SeriesFilter{TitleID: String(titleID)},
 		})
 		if err != nil {
 			t.Fatalf("AllSeries() error: %v", err)
@@ -98,7 +136,7 @@ func TestLiveCentralData(t *testing.T) {
 		nodes := page.Nodes()
 		t.Logf("AllSeries: totalCount=%d returned=%d", page.TotalCount, len(nodes))
 		if len(nodes) == 0 {
-			t.Fatal("AllSeries() returned 0 series for LoL")
+			t.Fatalf("AllSeries() returned 0 series for title %s", titleID)
 		}
 		t.Logf("First series: id=%s start=%s teams=%d", nodes[0].ID, nodes[0].StartTimeScheduled, len(nodes[0].Teams))
 
@@ -122,7 +160,7 @@ func TestLiveCentralData(t *testing.T) {
 	t.Run("TeamsAndTeamByID", func(t *testing.T) {
 		page, err := client.CentralData.Teams(ctx, TeamsParams{
 			Page:   PageParams{First: Int(5)},
-			Filter: &TeamFilter{TitleID: String("3")},
+			Filter: &TeamFilter{TitleID: String(titleID)},
 		})
 		if err != nil {
 			t.Fatalf("Teams() error: %v", err)
@@ -143,7 +181,7 @@ func TestLiveCentralData(t *testing.T) {
 	t.Run("PlayersAndPlayerByID", func(t *testing.T) {
 		page, err := client.CentralData.Players(ctx, PlayersParams{
 			Page:   PageParams{First: Int(5)},
-			Filter: &PlayerFilter{TitleID: String("3")},
+			Filter: &PlayerFilter{TitleID: String(titleID)},
 		})
 		if err != nil {
 			t.Fatalf("Players() error: %v", err)
@@ -193,7 +231,7 @@ func TestLiveCentralData(t *testing.T) {
 				return client.CentralData.Tournaments(ctx, TournamentsParams{
 					Page: PageParams{First: Int(2), After: after},
 					Filter: &TournamentFilter{
-						Title: &TournamentTitleFilter{ID: &IDFilter{In: []string{"3"}}},
+						Title: &TournamentTitleFilter{ID: &IDFilter{In: []string{titleID}}},
 					},
 				})
 			})
@@ -212,6 +250,7 @@ func TestLiveModularForms(t *testing.T) {
 	client := newLiveClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
+	titleID := liveTitleID(t, ctx, client)
 
 	t.Run("CustomDTOWithAllSeriesWithForm", func(t *testing.T) {
 		type SeriesCard struct {
@@ -227,7 +266,7 @@ func TestLiveModularForms(t *testing.T) {
 		page, err := liveCall(t, func() (Connection[SeriesCard], error) {
 			return AllSeriesWithForm(ctx, client, AllSeriesParams{
 				Page:   PageParams{First: Int(3)},
-				Filter: &SeriesFilter{TitleID: String("3")},
+				Filter: &SeriesFilter{TitleID: String(titleID)},
 			}, cardForm)
 		})
 		if err != nil {
@@ -254,15 +293,15 @@ func TestLiveModularForms(t *testing.T) {
 		if err != nil {
 			t.Fatalf("TitlesWithForm(Transform) error: %v", err)
 		}
-		if m["3"] == "" {
-			t.Fatalf("expected title ID 3 in transformed map, got %v", m)
+		if m[titleID] == "" {
+			t.Fatalf("expected title ID %s in transformed map, got %v", titleID, m)
 		}
-		t.Logf("Transformed titles map: %d entries (id 3=%q)", len(m), m["3"])
+		t.Logf("Transformed titles map: %d entries (id %s=%q)", len(m), titleID, m[titleID])
 	})
 
 	t.Run("RawAndMapForm", func(t *testing.T) {
 		raw, err := liveCall(t, func() (json.RawMessage, error) {
-			return TitleWithForm(ctx, client, "3", RawForm(TitleSelectionBasic))
+			return TitleWithForm(ctx, client, titleID, RawForm(TitleSelectionBasic))
 		})
 		if err != nil {
 			t.Fatalf("TitleWithForm(RawForm) error: %v", err)
@@ -271,13 +310,13 @@ func TestLiveModularForms(t *testing.T) {
 			t.Fatalf("RawForm returned invalid JSON: %s", string(raw))
 		}
 		m, err := liveCall(t, func() (map[string]any, error) {
-			return TitleWithForm(ctx, client, "3", MapForm(TitleSelectionBasic))
+			return TitleWithForm(ctx, client, titleID, MapForm(TitleSelectionBasic))
 		})
 		if err != nil {
 			t.Fatalf("TitleWithForm(MapForm) error: %v", err)
 		}
-		if m["id"] != "3" {
-			t.Fatalf("MapForm got id=%v, want 3", m["id"])
+		if m["id"] != titleID {
+			t.Fatalf("MapForm got id=%v, want %s", m["id"], titleID)
 		}
 	})
 }
@@ -286,28 +325,16 @@ func TestLiveSeriesState(t *testing.T) {
 	client := newLiveClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	titleID := liveTitleID(t, ctx, client)
 
-	// Find a recent LoL series that already started in the past.
-	now := time.Now().UTC().Format(time.RFC3339)
-	page, err := liveCall(t, func() (Connection[Series], error) {
-		return client.CentralData.AllSeries(ctx, AllSeriesParams{
-			Page:           PageParams{First: Int(10)},
-			OrderBy:        SeriesOrderByStartTimeScheduled,
-			OrderDirection: OrderDirectionDesc,
-			Filter: &SeriesFilter{
-				TitleID: String("3"),
-				StartTimeScheduled: &DateTimeFilter{
-					LTE: String(now),
-				},
-			},
-		})
+	nodes, err := liveCall(t, func() ([]Series, error) {
+		return client.CentralData.RecentSeries(ctx, titleID, 10)
 	})
 	if err != nil {
-		t.Fatalf("AllSeries() error: %v", err)
+		t.Fatalf("RecentSeries(%s) error: %v", titleID, err)
 	}
-	nodes := page.Nodes()
 	if len(nodes) == 0 {
-		t.Fatal("no past LoL series found")
+		t.Fatalf("no past series found for title %s", titleID)
 	}
 
 	var tested bool
@@ -334,15 +361,18 @@ func TestLiveSeriesState(t *testing.T) {
 }
 
 func TestLiveStats(t *testing.T) {
+	if os.Getenv("GRID_TEST_STATS") != "1" {
+		t.Skip("set GRID_TEST_STATS=1 with a Stats Feed-enabled key")
+	}
 	client := newLiveClient(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	titleID := liveTitleID(t, ctx, client)
 
-	// Grab a real LoL team ID and player ID from Central Data.
 	teamsPage, err := liveCall(t, func() (Connection[Team], error) {
 		return client.CentralData.Teams(ctx, TeamsParams{
 			Page:   PageParams{First: Int(3)},
-			Filter: &TeamFilter{TitleID: String("3")},
+			Filter: &TeamFilter{TitleID: String(titleID)},
 		})
 	})
 	if err != nil {
@@ -350,7 +380,7 @@ func TestLiveStats(t *testing.T) {
 	}
 	teams := teamsPage.Nodes()
 	if len(teams) == 0 {
-		t.Fatal("no LoL teams returned")
+		t.Fatalf("no teams returned for title %s", titleID)
 	}
 
 	t.Run("TeamStatistics", func(t *testing.T) {
@@ -360,6 +390,9 @@ func TestLiveStats(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatalf("TeamStatistics(%s) error: %v", teams[0].ID, err)
+		}
+		if stats.Series == nil || stats.Game == nil {
+			t.Fatalf("TeamStatistics(%s) is missing series or game aggregates", teams[0].ID)
 		}
 		t.Logf("TeamStatistics(%s): id=%s seriesCount=%d gameCount=%d",
 			teams[0].ID, stats.ID, stats.Series.Count, stats.Game.Count)
@@ -382,32 +415,32 @@ func TestLiveStats(t *testing.T) {
 
 	t.Run("SeriesStatistics", func(t *testing.T) {
 		stats, err := client.Stats.SeriesStatistics(ctx, SeriesStatisticsParams{
-			TitleID: "3",
+			TitleID: titleID,
 			Filter: SeriesStatisticsFilter{
 				StartedAt: &StatsDateTimeFilter{Period: TimeRangeLastMonth},
 			},
 		})
 		if err != nil {
-			t.Fatalf("SeriesStatistics(3) error: %v", err)
+			t.Fatalf("SeriesStatistics(%s) error: %v", titleID, err)
 		}
-		t.Logf("SeriesStatistics(3, LAST_MONTH): count=%d", stats.Count)
+		t.Logf("SeriesStatistics(%s, LAST_MONTH): count=%d", titleID, stats.Count)
 	})
 
 	t.Run("GameStatistics", func(t *testing.T) {
 		stats, err := client.Stats.GameStatistics(ctx, GameStatisticsParams{
-			TitleID: "3",
+			TitleID: titleID,
 			Filter:  GameStatisticsFilter{},
 		})
 		if err != nil {
-			t.Fatalf("GameStatistics(3) error: %v", err)
+			t.Fatalf("GameStatistics(%s) error: %v", titleID, err)
 		}
-		t.Logf("GameStatistics(3): count=%d", stats.Count)
+		t.Logf("GameStatistics(%s): count=%d", titleID, stats.Count)
 	})
 
 	playersPage, err := liveCall(t, func() (Connection[Player], error) {
 		return client.CentralData.Players(ctx, PlayersParams{
 			Page:   PageParams{First: Int(3)},
-			Filter: &PlayerFilter{TitleID: String("3")},
+			Filter: &PlayerFilter{TitleID: String(titleID)},
 		})
 	})
 	if err != nil {
@@ -423,6 +456,9 @@ func TestLiveStats(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PlayerStatistics(%s) error: %v", players[0].ID, err)
 			}
+			if stats.Series == nil || stats.Game == nil {
+				t.Fatalf("PlayerStatistics(%s) is missing series or game aggregates", players[0].ID)
+			}
 			t.Logf("PlayerStatistics(%s): id=%s seriesCount=%d gameCount=%d",
 				players[0].ID, stats.ID, stats.Series.Count, stats.Game.Count)
 		})
@@ -430,10 +466,10 @@ func TestLiveStats(t *testing.T) {
 }
 
 func TestLiveErrorHandling(t *testing.T) {
-	if os.Getenv("GRID_API_KEY") == "" {
+	if strings.TrimSpace(os.Getenv("GRID_API_KEY")) == "" {
 		t.Skip("GRID_API_KEY not set; skipping live error handling test")
 	}
-	badClient := NewClient("invalid-api-key-for-testing", WithTimeout(15*time.Second))
+	badClient := NewClient("invalid-api-key-for-testing", liveClientOption(t), WithTimeout(15*time.Second))
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 

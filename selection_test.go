@@ -35,6 +35,20 @@ func TestSelectionRenderAndImmutability(t *testing.T) {
 	}
 }
 
+func TestSelectionOwnsNestedNodes(t *testing.T) {
+	input := Field("games", Field("teams", Scalar("id")))
+	selection := Select(input)
+	want := selection.Render()
+
+	input.Sub[0].Sub[0].Name = "changedInput"
+	selection.Nodes()[0].Sub[0].Sub[0].Name = "changedSnapshot"
+	FieldSelect("seriesState", selection).Sub[0].Sub[0].Sub[0].Name = "changedWrapper"
+
+	if got := selection.Render(); got != want {
+		t.Fatalf("nested mutation changed selection:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 func TestSelectionInlineFragmentAndAlias(t *testing.T) {
 	sel := Select(
 		AliasedField("seriesId", "id"),

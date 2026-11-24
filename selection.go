@@ -20,9 +20,7 @@ type Selection struct {
 
 // Select creates a new Selection from the provided nodes.
 func Select(nodes ...SelectionNode) Selection {
-	cloned := make([]SelectionNode, len(nodes))
-	copy(cloned, nodes)
-	return Selection{nodes: cloned}
+	return Selection{nodes: cloneSelectionNodes(nodes)}
 }
 
 // Scalars creates a Selection containing only scalar field names.
@@ -43,11 +41,9 @@ func Scalar(name string) SelectionNode {
 
 // Field creates a SelectionNode for a field with optional nested sub-selections.
 func Field(name string, sub ...SelectionNode) SelectionNode {
-	cloned := make([]SelectionNode, len(sub))
-	copy(cloned, sub)
 	return SelectionNode{
 		Name: strings.TrimSpace(name),
-		Sub:  cloned,
+		Sub:  cloneSelectionNodes(sub),
 	}
 }
 
@@ -66,12 +62,10 @@ func AliasedField(alias, name string, sub ...SelectionNode) SelectionNode {
 // InlineFragment creates a GraphQL inline fragment (`... on TypeName { ... }`).
 // This is useful for GRID interfaces such as ContentCatalogEntity or title-specific Stats Feed types.
 func InlineFragment(typeName string, sub ...SelectionNode) SelectionNode {
-	cloned := make([]SelectionNode, len(sub))
-	copy(cloned, sub)
 	return SelectionNode{
 		Name:           strings.TrimSpace(typeName),
 		InlineFragment: true,
-		Sub:            cloned,
+		Sub:            cloneSelectionNodes(sub),
 	}
 }
 
@@ -89,11 +83,9 @@ func (s Selection) IsEmpty() bool {
 	return len(s.nodes) == 0
 }
 
-// Nodes returns a defensive copy of the selection's top-level nodes.
+// Nodes returns a defensive copy of the selection's nodes and their descendants.
 func (s Selection) Nodes() []SelectionNode {
-	out := make([]SelectionNode, len(s.nodes))
-	copy(out, s.nodes)
-	return out
+	return cloneSelectionNodes(s.nodes)
 }
 
 // With returns a new Selection with additional nodes appended and merged without mutating s.
@@ -133,6 +125,17 @@ func (s Selection) Render() string {
 	return renderNodes(s.nodes, 0)
 }
 
+func cloneSelectionNodes(nodes []SelectionNode) []SelectionNode {
+	cloned := make([]SelectionNode, len(nodes))
+	for i, node := range nodes {
+		if node.Sub != nil {
+			node.Sub = cloneSelectionNodes(node.Sub)
+		}
+		cloned[i] = node
+	}
+	return cloned
+}
+
 func mergeNodes(base, extra []SelectionNode) []SelectionNode {
 	out := make([]SelectionNode, 0, len(base)+len(extra))
 	index := make(map[string]int, len(base)+len(extra))
@@ -141,6 +144,9 @@ func mergeNodes(base, extra []SelectionNode) []SelectionNode {
 		if n.Raw != "" {
 			key := "raw:" + n.Raw
 			if _, exists := index[key]; !exists {
+				if n.Sub != nil {
+					n.Sub = cloneSelectionNodes(n.Sub)
+				}
 				index[key] = len(out)
 				out = append(out, n)
 			}
