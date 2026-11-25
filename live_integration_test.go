@@ -39,19 +39,14 @@ func liveClientOption(t *testing.T) ClientOption {
 
 func liveTitleID(t *testing.T, ctx context.Context, client *Client) string {
 	t.Helper()
-	if id := strings.TrimSpace(os.Getenv("GRID_TEST_TITLE_ID")); id != "" {
-		return id
-	}
-	titles, err := liveCall(t, func() ([]Title, error) {
-		return client.CentralData.ListTitles(ctx)
+	titleID, err := liveCall(t, func() (string, error) {
+		return integrationTitleID(ctx, client, os.Getenv("GRID_TEST_TITLE_ID"))
 	})
 	if err != nil {
-		t.Fatalf("ListTitles() error: %v", err)
+		t.Fatalf("select live test title: %v", err)
 	}
-	if len(titles) == 0 {
-		t.Fatal("ListTitles() returned 0 titles")
-	}
-	return titles[0].ID
+	t.Logf("Using title ID %s for live tests", titleID)
+	return titleID
 }
 
 func liveCall[T any](t *testing.T, fn func() (T, error)) (T, error) {
@@ -226,23 +221,20 @@ func TestLiveCentralData(t *testing.T) {
 	})
 
 	t.Run("CollectAllPagination", func(t *testing.T) {
-		items, err := liveCall(t, func() ([]Tournament, error) {
-			return CollectAll(ctx, 2, func(ctx context.Context, after *string) (Connection[Tournament], error) {
-				return client.CentralData.Tournaments(ctx, TournamentsParams{
-					Page: PageParams{First: Int(2), After: after},
-					Filter: &TournamentFilter{
-						Title: &TournamentTitleFilter{ID: &IDFilter{In: []string{titleID}}},
-					},
+		items, err := liveCall(t, func() ([]Organization, error) {
+			return CollectAll(ctx, 2, func(ctx context.Context, after *string) (Connection[Organization], error) {
+				return client.CentralData.Organizations(ctx, OrganizationsParams{
+					Page: PageParams{First: Int(1), After: after},
 				})
 			})
 		})
 		if err != nil {
-			t.Fatalf("CollectAll(Tournaments) error: %v", err)
+			t.Fatalf("CollectAll(Organizations) error: %v", err)
 		}
-		if len(items) < 2 {
-			t.Fatalf("CollectAll(Tournaments) got %d items, expected at least 2", len(items))
+		if len(items) != 2 || items[0].ID == "" || items[1].ID == "" || items[0].ID == items[1].ID {
+			t.Fatalf("CollectAll(Organizations) got %+v, expected two distinct organizations", items)
 		}
-		t.Logf("CollectAll(2 pages x 2): collected %d tournaments", len(items))
+		t.Logf("CollectAll(2 pages x 1): collected organizations %s and %s", items[0].ID, items[1].ID)
 	})
 }
 
@@ -356,7 +348,7 @@ func TestLiveSeriesState(t *testing.T) {
 		break
 	}
 	if !tested {
-		t.Fatalf("none of the %d recent LoL series returned a SeriesState", len(nodes))
+		t.Fatalf("none of the %d recent series for title %s returned a SeriesState", len(nodes), titleID)
 	}
 }
 

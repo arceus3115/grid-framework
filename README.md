@@ -31,7 +31,7 @@ printf '\n'
 export GRID_API_KEY
 ```
 
-Save this as `main.go`. Run `go run .` to list the title IDs your key can access, then run `go run . TITLE_ID` with one of those IDs to look up a recent series and its state.
+Save this as `main.go`. Run `go run .` to list title IDs from GRID's catalog, then run `go run . TITLE_ID` to look up a recent series and its state. Series coverage depends on your key, and a catalog title can return an empty series list.
 
 ```go
 package main
@@ -295,7 +295,7 @@ Export `GRID_API_KEY` as in [Quick start](#quick-start), then opt in with the `i
 go test -tags integration -run '^TestLive' -v -count=1 ./...
 ```
 
-The suite defaults to Riot Open Access endpoints and uses the first title returned by `ListTitles`. Set `GRID_TEST_ACCESS=commercial` for commercial endpoints or `GRID_TEST_TITLE_ID` to select a title with recent series data. Set `GRID_TEST_STATS=1` when your key has Stats Feed access.
+The suite defaults to Riot Open Access endpoints and selects a title from recent series visible to your key. Set `GRID_TEST_ACCESS=commercial` for commercial endpoints or `GRID_TEST_TITLE_ID` to select a title explicitly. Set `GRID_TEST_STATS=1` when your key has Stats Feed access.
 
 ### Releases
 

@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-// ListTitles returns the titles available to the configured GRID account.
+// ListTitles returns the titles in GRID's Central Data catalog. Use
+// [CentralDataService.RecentSeries] to find past series visible to your account for a title.
 func (s *CentralDataService) ListTitles(ctx context.Context) ([]Title, error) {
 	return s.Titles(ctx, TitlesParams{})
 }
